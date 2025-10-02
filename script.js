@@ -1,6 +1,7 @@
 (async () => {
     // --- Script Logic ---
-    let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
+    let wpRequire;
+    webpackChunkdiscord_app.push([[Symbol()], {}, (req) => { wpRequire = req; }]);
     webpackChunkdiscord_app.pop();
 
     let ApplicationStreamingStore = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)?.exports.Z;
