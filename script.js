@@ -198,7 +198,7 @@
         <div style="margin-bottom:8px"><strong>Task:</strong> <span id="quest-task">N/A</span></div>
         <div style="margin-bottom:12px;color:#72767d"><strong>Expires:</strong> <span id="quest-exp">N/A</span></div>
         <div style="font-size:14px;display:none" id="quest-finish">Quest Finish!</div>
-        <div style="font-size:12px;display:${quests.length === 0 ? 'block' : 'none'}" id="quest-no-quests">Accept Quests first/You don't have uncompleted quests</div>
+        <div style="font-size:12px;display:${quests.length === 0 ? 'block' : 'none'}" id="quest-no-quests">Accept Quests first or You don't have uncompleted quests</div>
         <div style="font-size:12px;display:none" id="quest-error"></div>
     `;
     overlay.appendChild(details);
