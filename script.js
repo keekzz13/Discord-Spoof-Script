@@ -1,3 +1,4 @@
+
 let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
 webpackChunkdiscord_app.pop();
 
@@ -15,6 +16,15 @@ if (!QuestsStore || !api) {
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+function getRandomColor() {
+    const letters = '0123456789ABCDEF';
+    let color = '#';
+    for (let i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+    }
+    return color;
+}
 
 function getAvailableQuests() {
     return [...QuestsStore.quests.values()]
@@ -35,7 +45,6 @@ function getAvailableQuests() {
 let quests = getAvailableQuests();
 let isApp = typeof DiscordNative !== "undefined";
 
-// --- UI Setup ---
 const existing = document.getElementById('quest-overlay');
 if (existing) existing.remove();
 
@@ -63,13 +72,14 @@ Object.assign(appearBtn.style, {
 appearBtn.innerHTML = '↖';
 document.body.appendChild(appearBtn);
 
+// Overlay
 const overlay = document.createElement('div');
 overlay.id = 'quest-overlay';
 overlay.innerHTML = `
     <style>
         #quest-overlay {
-            --bg-start: #202225;
-            --bg-end: #181A1D;
+            --bg-start: ${getRandomColor()};
+            --bg-end: ${getRandomColor()};
             --text-color: #dcddde;
             --accent-color: #5865F2;
             position: fixed;
@@ -122,10 +132,9 @@ overlay.innerHTML = `
 `;
 overlay.appendChild(document.createElement('div'));
 
-// Header
 const header = document.createElement('div');
 header.id = 'quest-overlay-header';
-header.textContent = 'Aurox Assets 👑 Quest Spoofer';
+header.textContent = 'Aurox 👑 Quest Spoofer';
 overlay.appendChild(header);
 
 const questSelectWrap = document.createElement('div');
@@ -142,19 +151,17 @@ questSelect.id = 'quest-select';
 questSelectWrap.appendChild(questSelect);
 overlay.appendChild(questSelectWrap);
 
-// Color Customization
 const colorWrap = document.createElement('div');
 colorWrap.style.marginBottom = '10px';
 colorWrap.innerHTML = `
     <label style="display:block;margin-bottom:6px;font-weight:500">Background Colors:</label>
     <div style="display:flex;gap:8px">
-        <input type="color" id="bg-start" value="#202225" title="Start Gradient">
-        <input type="color" id="bg-end" value="#181A1D" title="End Gradient">
+        <input type="color" id="bg-start" value="${getRandomColor()}" title="Start Gradient">
+        <input type="color" id="bg-end" value="${getRandomColor()}" title="End Gradient">
     </div>
 `;
 overlay.appendChild(colorWrap);
 
-// Details
 const details = document.createElement('div');
 details.innerHTML = `
     <div style="margin-bottom:6px"><strong>App:</strong> <span id="quest-appname">Select a quest</span></div>
@@ -165,7 +172,6 @@ details.innerHTML = `
 `;
 overlay.appendChild(details);
 
-// Progress
 const progWrap = document.createElement('div');
 progWrap.style.marginBottom = '10px';
 const progressText = document.createElement('div');
@@ -187,7 +193,6 @@ barBg.appendChild(bar);
 progWrap.appendChild(barBg);
 overlay.appendChild(progWrap);
 
-// Controls
 const controls = document.createElement('div');
 controls.style.display = 'flex';
 controls.style.gap = '8px';
@@ -220,7 +225,6 @@ controls.appendChild(hideBtn);
 controls.appendChild(closeBtn);
 overlay.appendChild(controls);
 
-// Footer link
 const discordLink = document.createElement('div');
 discordLink.style.textAlign = 'center';
 discordLink.style.fontSize = '12px';
@@ -230,7 +234,6 @@ overlay.appendChild(discordLink);
 
 document.body.appendChild(overlay);
 
-// Dragging header
 let isDragging = false;
 let initialX = 0, initialY = 0, currentX = window.innerWidth - 360 - 20, currentY = 20;
 header.addEventListener('mousedown', (e) => {
@@ -284,6 +287,7 @@ let timer = null;
 let unsubscribe = null;
 let pid = null;
 let localTimer = null;
+let realFunc = null; 
 
 function updateUI() {
     const questData = currentQuest ? QuestsStore.getQuest(currentQuest.id) : null;
@@ -353,7 +357,7 @@ function resetState() {
             console.error('Error resetting game state:', e);
         }
     }
-    if (taskName === "STREAM_ON_DESKTOP" && pid) {
+    if (taskName === "STREAM_ON_DESKTOP" && pid && realFunc) {
         try { 
             ApplicationStreamingStore.getStreamerActiveStreamMetadata = realFunc; 
         } catch (e) {
@@ -487,7 +491,7 @@ async function startQuest() {
     if (taskName === "STREAM_ON_DESKTOP") {
         if (!isApp) { showError("STREAM_ON_DESKTOP requires the Discord desktop app."); resetState(); return; }
         try {
-            const realFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
+            realFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
             ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({ id: applicationId, pid, sourceName: null });
 
             unsubscribe = (data) => {
