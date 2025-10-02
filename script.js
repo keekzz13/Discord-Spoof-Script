@@ -1,4 +1,3 @@
-// Dependency extraction
 let wpRequire = webpackChunkdiscord_app.push([[Symbol()], {}, r => r]);
 webpackChunkdiscord_app.pop();
 
@@ -10,16 +9,13 @@ let GuildChannelStore = Object.values(wpRequire.c).find(x => x?.exports?.ZP?.get
 let FluxDispatcher = Object.values(wpRequire.c).find(x => x?.exports?.Z?.__proto__?.flushWaitQueue)?.exports.Z;
 let api = Object.values(wpRequire.c).find(x => x?.exports?.tn?.get)?.exports.tn;
 
-// Dependency check
 if (!QuestsStore || !api) {
     console.error("QuestsStore or API not found!");
     throw new Error("Missing required dependencies");
 }
 
-// Utility
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// Helper: Build the quests array including unenrolled quests
 function getAvailableQuests() {
     return [...QuestsStore.quests.values()]
         .filter(q =>
@@ -36,7 +32,6 @@ function getAvailableQuests() {
         });
 }
 
-// Initial list
 let quests = getAvailableQuests();
 let isApp = typeof DiscordNative !== "undefined";
 
@@ -44,7 +39,6 @@ let isApp = typeof DiscordNative !== "undefined";
 const existing = document.getElementById('quest-overlay');
 if (existing) existing.remove();
 
-// Appear button
 const appearBtn = document.createElement('button');
 appearBtn.id = 'quest-appear-btn';
 Object.assign(appearBtn.style, {
@@ -69,7 +63,6 @@ Object.assign(appearBtn.style, {
 appearBtn.innerHTML = '↖';
 document.body.appendChild(appearBtn);
 
-// Overlay
 const overlay = document.createElement('div');
 overlay.id = 'quest-overlay';
 overlay.innerHTML = `
@@ -132,10 +125,9 @@ overlay.appendChild(document.createElement('div'));
 // Header
 const header = document.createElement('div');
 header.id = 'quest-overlay-header';
-header.textContent = 'Aurox Assets 👑 Quest Helper';
+header.textContent = 'Aurox Assets 👑 Quest Spoofer';
 overlay.appendChild(header);
 
-// Quest Selector
 const questSelectWrap = document.createElement('div');
 questSelectWrap.style.marginBottom = '10px';
 const questLabel = document.createElement('label');
