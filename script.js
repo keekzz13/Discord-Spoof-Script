@@ -16,6 +16,7 @@
         .sort((a, b) => new Date(b.userStatus.enrolledAt).getTime() - new Date(a.userStatus.enrolledAt).getTime());
     let isApp = typeof DiscordNative !== "undefined";
 
+    // Attempt to enroll in a video quest if no active quests
     if (quests.length === 0) {
         const allQuests = [...QuestsStore.quests.values()].filter(x => x.id !== "1248385850622869556" && new Date(x.config.expiresAt).getTime() > Date.now());
         const videoQuest = allQuests.find(q => {
@@ -145,11 +146,13 @@
     `;
     overlay.appendChild(document.createElement('div'));
 
+    // Header
     const header = document.createElement('div');
     header.id = 'quest-overlay-header';
     header.textContent = 'Aurox Assets 👑 Quest Spoofer';
     overlay.appendChild(header);
 
+    // Quest Selector
     const questSelectWrap = document.createElement('div');
     questSelectWrap.style.marginBottom = '12px';
     const questLabel = document.createElement('label');
@@ -176,6 +179,7 @@
     questSelectWrap.appendChild(questSelect);
     overlay.appendChild(questSelectWrap);
 
+    // Color Customization
     const colorWrap = document.createElement('div');
     colorWrap.style.marginBottom = '12px';
     colorWrap.innerHTML = `
@@ -187,6 +191,7 @@
     `;
     overlay.appendChild(colorWrap);
 
+    // Quest Details
     const details = document.createElement('div');
     details.innerHTML = `
         <div style="margin-bottom:8px"><strong>App:</strong> <span id="quest-appname">Select a quest</span></div>
@@ -252,6 +257,7 @@
     controls.appendChild(closeBtn);
     overlay.appendChild(controls);
 
+    // Discord Server Link
     const discordLink = document.createElement('div');
     discordLink.style.textAlign = 'center';
     discordLink.style.fontSize = '12px';
@@ -263,7 +269,8 @@
 
     // --- UI Interactivity ---
     let isDragging = false;
-    let currentX, currentY, initialX, initialY;
+    let currentX = window.innerWidth - 340 - 20;
+    let currentY = 20;
     header.addEventListener('mousedown', (e) => {
         isDragging = true;
         initialX = e.clientX - currentX;
@@ -412,6 +419,219 @@
         updateUI();
     }
 
+    async function startQuest() {
+        if (!currentQuest) {
+            showError("Please select a quest!");
+            return;
+        }
+        if (isRunning) return; // Prevent restarting if already running
+        startBtn.textContent = 'Pause';
+        isRunning = true;
+        pid = Math.floor(Math.random() * 30000) + 1000;
+        const applicationId = currentQuest.config.application.id;
+        startLocalTimer();
+
+        if (taskName === "WATCH_VIDEO") {
+            const maxFuture = 10, speed = 7, interval = 1;
+            const enrolledAt = new Date(currentQuest.userStatus.enrolledAt).getTime();
+            timer = setInterval(async () => {
+                if (!isRunning) {
+                    console.log('Stopped WATCH_VIDEO timer due to pause');
+                    return;
+                }
+                const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + maxFuture;
+                const diff = maxAllowed - secondsDone;
+                const timestamp = secondsDone + speed;
+                if (diff >= speed) {
+                    try {
+                        const res = await api.post({url: `/quests/${currentQuest.id}/video-progress`, body: {timestamp: Math.min(secondsNeeded, timestamp + Math.random())}});
+                        if (isRunning && res.body?.progress?.WATCH_VIDEO) {
+                            secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, Math.floor(res.body.progress.WATCH_VIDEO.value)));
+                            updateUI();
+                            console.log(`WATCH_VIDEO server progress: ${secondsDone}/${secondsNeeded}`);
+                        }
+                    } catch (error) {
+                        showError(`Error updating video progress: ${error}`);
+                    }
+                }
+            }, interval * 1000);
+        } else if (taskName === "PLAY_ON_DESKTOP") {
+            if (!isApp) {
+                showError("Use the desktop app for this quest!");
+                startBtn.textContent = 'Start';
+                isRunning = false;
+                clearInterval(localTimer);
+                localTimer = null;
+                return;
+            }
+            try {
+                const res = await api.get({url: `/applications/public?application_ids=${applicationId}`});
+                const appData = res.body[0];
+                if (!appData || !appData.executables) {
+                    showError("Failed to fetch application data!");
+                    startBtn.textContent = 'Start';
+                    isRunning = false;
+                    clearInterval(localTimer);
+                    localTimer = null;
+                    return;
+                }
+                const exeName = appData.executables.find(x => x.os === "win32")?.name?.replace(">", "") || appData.name;
+                const fakeGame = {
+                    cmdLine: `C:\\Program Files\\${appData.name}\\${exeName}`,
+                    exeName,
+                    exePath: `c:/program files/${appData.name.toLowerCase()}/${exeName}`,
+                    hidden: false,
+                    isLauncher: false,
+                    id: applicationId,
+                    name: appData.name,
+                    pid: pid,
+                    pidPath: [pid],
+                    processName: appData.name,
+                    start: Date.now(),
+                };
+                const realGames = RunningGameStore.getRunningGames();
+                const fakeGames = [fakeGame];
+                const realGetRunningGames = RunningGameStore.getRunningGames;
+                const realGetGameForPID = RunningGameStore.getGameForPID;
+                RunningGameStore.getRunningGames = () => fakeGames;
+                RunningGameStore.getGameForPID = (pid) => fakeGames.find(x => x.pid === pid);
+                FluxDispatcher.dispatch({type: "RUNNING_GAMES_CHANGE", removed: realGames, added: [fakeGame], games: fakeGames});
+
+                timer = setInterval(() => {
+                    if (!isRunning) {
+                        console.log('Stopped PLAY_ON_DESKTOP sync timer due to pause');
+                        return;
+                    }
+                    syncProgress();
+                }, 5000);
+
+                unsubscribe = (data) => {
+                    if (!isRunning) {
+                        console.log('Ignored PLAY_ON_DESKTOP update due to pause');
+                        return;
+                    }
+                    let progress = currentQuest.config.configVersion === 1 ? data.userStatus.streamProgressSeconds : Math.floor(data.userStatus.progress.PLAY_ON_DESKTOP.value);
+                    secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, progress));
+                    updateUI();
+                    console.log(`PLAY_ON_DESKTOP event progress: ${secondsDone}/${secondsNeeded}`);
+                    if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
+                        clearInterval(localTimer);
+                        clearInterval(timer);
+                        localTimer = null;
+                        timer = null;
+                        startBtn.textContent = 'Completed ✅';
+                        startBtn.disabled = true;
+                        RunningGameStore.getRunningGames = realGetRunningGames;
+                        RunningGameStore.getGameForPID = realGetGameForPID;
+                        FluxDispatcher.dispatch({type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: []});
+                        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
+                        unsubscribe = null;
+                        isRunning = false;
+                        console.log('PLAY_ON_DESKTOP quest completed');
+                    }
+                };
+                FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
+            } catch (error) {
+                showError(`Error: ${error}`);
+                startBtn.textContent = 'Start';
+                isRunning = false;
+                clearInterval(localTimer);
+                localTimer = null;
+            }
+        } else if (taskName === "STREAM_ON_DESKTOP") {
+            if (!isApp) {
+                showError("Use the desktop app for this quest!");
+                startBtn.textContent = 'Start';
+                isRunning = false;
+                clearInterval(localTimer);
+                localTimer = null;
+                return;
+            }
+            let realFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
+            ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({
+                id: applicationId,
+                pid,
+                sourceName: null
+            });
+
+            timer = setInterval(() => {
+                if (!isRunning) {
+                    console.log('Stopped STREAM_ON_DESKTOP sync timer due to pause');
+                    return;
+                }
+                syncProgress();
+            }, 5000);
+
+            unsubscribe = (data) => {
+                if (!isRunning) {
+                    console.log('Ignored STREAM_ON_DESKTOP update due to pause');
+                    return;
+                }
+                let progress = currentQuest.config.configVersion === 1 ? data.userStatus.streamProgressSeconds : Math.floor(data.userStatus.progress.STREAM_ON_DESKTOP.value);
+                secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, progress));
+                updateUI();
+                console.log(`STREAM_ON_DESKTOP event progress: ${secondsDone}/${secondsNeeded}`);
+                if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
+                    clearInterval(localTimer);
+                    clearInterval(timer);
+                    localTimer = null;
+                    timer = null;
+                    startBtn.textContent = 'Completed ✅';
+                    startBtn.disabled = true;
+                    ApplicationStreamingStore.getStreamerActiveStreamMetadata = realFunc;
+                    FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
+                    unsubscribe = null;
+                    isRunning = false;
+                    console.log('STREAM_ON_DESKTOP quest completed');
+                }
+            };
+            FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
+        } else if (taskName === "PLAY_ACTIVITY") {
+            const channelId = ChannelStore.getSortedPrivateChannels()[0]?.id ?? Object.values(GuildChannelStore.getAllGuilds()).find(x => x != null && x.VOCAL.length > 0)?.VOCAL[0]?.channel.id;
+            if (!channelId) {
+                showError("No suitable channel found!");
+                startBtn.textContent = 'Start';
+                isRunning = false;
+                clearInterval(localTimer);
+                localTimer = null;
+                return;
+            }
+            const streamKey = `call:${channelId}:1`;
+            timer = setInterval(async () => {
+                if (!isRunning) {
+                    console.log('Stopped PLAY_ACTIVITY timer due to pause');
+                    return;
+                }
+                try {
+                    const res = await api.post({url: `/quests/${currentQuest.id}/heartbeat`, body: {stream_key: streamKey, terminal: false}});
+                    if (isRunning && res.body?.progress?.PLAY_ACTIVITY) {
+                        secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, Math.floor(res.body.progress.PLAY_ACTIVITY.value)));
+                        updateUI();
+                        console.log(`PLAY_ACTIVITY server progress: ${secondsDone}/${secondsNeeded}`);
+                    }
+                    if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
+                        await api.post({url: `/quests/${currentQuest.id}/heartbeat`, body: {stream_key: streamKey, terminal: true}});
+                        clearInterval(timer);
+                        clearInterval(localTimer);
+                        timer = null;
+                        localTimer = null;
+                        startBtn.textContent = 'Completed ✅';
+                        startBtn.disabled = true;
+                        isRunning = false;
+                        updateUI();
+                        console.log('PLAY_ACTIVITY quest completed');
+                    }
+                } catch (error) {
+                    showError(`Error: ${error}`);
+                    startBtn.textContent = 'Start';
+                    isRunning = false;
+                    clearInterval(localTimer);
+                    localTimer = null;
+                }
+            }, 20 * 1000);
+        }
+    }
+
     // Quest Selection Handler
     questSelect.onchange = () => {
         resetState();
@@ -441,224 +661,16 @@
     };
 
     // Start/Pause Button Logic
-    startBtn.onclick = async () => {
-        if (!currentQuest) {
-            showError("Please select a quest!");
-            return;
-        }
-
+    startBtn.onclick = () => {
         if (isRunning) {
             resetState();
             console.log('Paused quest execution');
         } else {
-            startBtn.textContent = 'Pause';
-            isRunning = true;
-            pid = Math.floor(Math.random() * 30000) + 1000;
-            const applicationId = currentQuest.config.application.id;
-            startLocalTimer();
-
-            if (taskName === "WATCH_VIDEO") {
-                const maxFuture = 10, speed = 7, interval = 1;
-                const enrolledAt = new Date(currentQuest.userStatus.enrolledAt).getTime();
-                timer = setInterval(async () => {
-                    if (!isRunning) {
-                        console.log('Stopped WATCH_VIDEO timer due to pause');
-                        return;
-                    }
-                    const maxAllowed = Math.floor((Date.now() - enrolledAt) / 1000) + maxFuture;
-                    const diff = maxAllowed - secondsDone;
-                    const timestamp = secondsDone + speed;
-                    if (diff >= speed) {
-                        try {
-                            const res = await api.post({url: `/quests/${currentQuest.id}/video-progress`, body: {timestamp: Math.min(secondsNeeded, timestamp + Math.random())}});
-                            if (isRunning && res.body?.progress?.WATCH_VIDEO) {
-                                secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, Math.floor(res.body.progress.WATCH_VIDEO.value)));
-                                updateUI();
-                                console.log(`WATCH_VIDEO server progress: ${secondsDone}/${secondsNeeded}`);
-                            }
-                        } catch (error) {
-                            showError(`Error updating video progress: ${error}`);
-                        }
-                    }
-                }, interval * 1000);
-            } else if (taskName === "PLAY_ON_DESKTOP") {
-                if (!isApp) {
-                    showError("Use the desktop app for this quest!");
-                    startBtn.textContent = 'Start';
-                    isRunning = false;
-                    clearInterval(localTimer);
-                    localTimer = null;
-                    return;
-                }
-                try {
-                    const res = await api.get({url: `/applications/public?application_ids=${applicationId}`});
-                    const appData = res.body[0];
-                    if (!appData || !appData.executables) {
-                        showError("Failed to fetch application data!");
-                        startBtn.textContent = 'Start';
-                        isRunning = false;
-                        clearInterval(localTimer);
-                        localTimer = null;
-                        return;
-                    }
-                    const exeName = appData.executables.find(x => x.os === "win32")?.name?.replace(">", "") || appData.name;
-                    const fakeGame = {
-                        cmdLine: `C:\\Program Files\\${appData.name}\\${exeName}`,
-                        exeName,
-                        exePath: `c:/program files/${appData.name.toLowerCase()}/${exeName}`,
-                        hidden: false,
-                        isLauncher: false,
-                        id: applicationId,
-                        name: appData.name,
-                        pid: pid,
-                        pidPath: [pid],
-                        processName: appData.name,
-                        start: Date.now(),
-                    };
-                    const realGames = RunningGameStore.getRunningGames();
-                    const fakeGames = [fakeGame];
-                    const realGetRunningGames = RunningGameStore.getRunningGames;
-                    const realGetGameForPID = RunningGameStore.getGameForPID;
-                    RunningGameStore.getRunningGames = () => fakeGames;
-                    RunningGameStore.getGameForPID = (pid) => fakeGames.find(x => x.pid === pid);
-                    FluxDispatcher.dispatch({type: "RUNNING_GAMES_CHANGE", removed: realGames, added: [fakeGame], games: fakeGames});
-
-                    timer = setInterval(() => {
-                        if (!isRunning) {
-                            console.log('Stopped PLAY_ON_DESKTOP sync timer due to pause');
-                            return;
-                        }
-                        syncProgress();
-                    }, 5000);
-
-                    unsubscribe = (data) => {
-                        if (!isRunning) {
-                            console.log('Ignored PLAY_ON_DESKTOP update due to pause');
-                            return;
-                        }
-                        let progress = currentQuest.config.configVersion === 1 ? data.userStatus.streamProgressSeconds : Math.floor(data.userStatus.progress.PLAY_ON_DESKTOP.value);
-                        secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, progress));
-                        updateUI();
-                        console.log(`PLAY_ON_DESKTOP event progress: ${secondsDone}/${secondsNeeded}`);
-                        if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
-                            clearInterval(localTimer);
-                            clearInterval(timer);
-                            localTimer = null;
-                            timer = null;
-                            startBtn.textContent = 'Completed ✅';
-                            startBtn.disabled = true;
-                            RunningGameStore.getRunningGames = realGetRunningGames;
-                            RunningGameStore.getGameForPID = realGetGameForPID;
-                            FluxDispatcher.dispatch({type: "RUNNING_GAMES_CHANGE", removed: [fakeGame], added: [], games: []});
-                            FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
-                            unsubscribe = null;
-                            isRunning = false;
-                            console.log('PLAY_ON_DESKTOP quest completed');
-                        }
-                    };
-                    FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
-                } catch (error) {
-                    showError(`Error: ${error}`);
-                    startBtn.textContent = 'Start';
-                    isRunning = false;
-                    clearInterval(localTimer);
-                    localTimer = null;
-                }
-            } else if (taskName === "STREAM_ON_DESKTOP") {
-                if (!isApp) {
-                    showError("Use the desktop app for this quest!");
-                    startBtn.textContent = 'Start';
-                    isRunning = false;
-                    clearInterval(localTimer);
-                    localTimer = null;
-                    return;
-                }
-                let realFunc = ApplicationStreamingStore.getStreamerActiveStreamMetadata;
-                ApplicationStreamingStore.getStreamerActiveStreamMetadata = () => ({
-                    id: applicationId,
-                    pid,
-                    sourceName: null
-                });
-
-                timer = setInterval(() => {
-                    if (!isRunning) {
-                        console.log('Stopped STREAM_ON_DESKTOP sync timer due to pause');
-                        return;
-                    }
-                    syncProgress();
-                }, 5000);
-
-                unsubscribe = (data) => {
-                    if (!isRunning) {
-                        console.log('Ignored STREAM_ON_DESKTOP update due to pause');
-                        return;
-                    }
-                    let progress = currentQuest.config.configVersion === 1 ? data.userStatus.streamProgressSeconds : Math.floor(data.userStatus.progress.STREAM_ON_DESKTOP.value);
-                    secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, progress));
-                    updateUI();
-                    console.log(`STREAM_ON_DESKTOP event progress: ${secondsDone}/${secondsNeeded}`);
-                    if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
-                        clearInterval(localTimer);
-                        clearInterval(timer);
-                        localTimer = null;
-                        timer = null;
-                        startBtn.textContent = 'Completed ✅';
-                        startBtn.disabled = true;
-                        ApplicationStreamingStore.getStreamerActiveStreamMetadata = realFunc;
-                        FluxDispatcher.unsubscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
-                        unsubscribe = null;
-                        isRunning = false;
-                        console.log('STREAM_ON_DESKTOP quest completed');
-                    }
-                };
-                FluxDispatcher.subscribe("QUESTS_SEND_HEARTBEAT_SUCCESS", unsubscribe);
-            } else if (taskName === "PLAY_ACTIVITY") {
-                const channelId = ChannelStore.getSortedPrivateChannels()[0]?.id ?? Object.values(GuildChannelStore.getAllGuilds()).find(x => x != null && x.VOCAL.length > 0)?.VOCAL[0]?.channel.id;
-                if (!channelId) {
-                    showError("No suitable channel found!");
-                    startBtn.textContent = 'Start';
-                    isRunning = false;
-                    clearInterval(localTimer);
-                    localTimer = null;
-                    return;
-                }
-                const streamKey = `call:${channelId}:1`;
-                timer = setInterval(async () => {
-                    if (!isRunning) {
-                        console.log('Stopped PLAY_ACTIVITY timer due to pause');
-                        return;
-                    }
-                    try {
-                        const res = await api.post({url: `/quests/${currentQuest.id}/heartbeat`, body: {stream_key: streamKey, terminal: false}});
-                        if (isRunning && res.body?.progress?.PLAY_ACTIVITY) {
-                            secondsDone = Math.min(secondsNeeded, Math.max(secondsDone, Math.floor(res.body.progress.PLAY_ACTIVITY.value)));
-                            updateUI();
-                            console.log(`PLAY_ACTIVITY server progress: ${secondsDone}/${secondsNeeded}`);
-                        }
-                        if (QuestsStore.getQuest(currentQuest.id).userStatus.completedAt) {
-                            await api.post({url: `/quests/${currentQuest.id}/heartbeat`, body: {stream_key: streamKey, terminal: true}});
-                            clearInterval(timer);
-                            clearInterval(localTimer);
-                            timer = null;
-                            localTimer = null;
-                            startBtn.textContent = 'Completed ✅';
-                            startBtn.disabled = true;
-                            isRunning = false;
-                            updateUI();
-                            console.log('PLAY_ACTIVITY quest completed');
-                        }
-                    } catch (error) {
-                        showError(`Error: ${error}`);
-                        startBtn.textContent = 'Start';
-                        isRunning = false;
-                        clearInterval(localTimer);
-                        localTimer = null;
-                    }
-                }, 20 * 1000);
-            }
+            startQuest();
         }
     };
 
+    // Close Button Logic
     closeBtn.onclick = () => {
         resetState();
         overlay.remove();
@@ -666,20 +678,23 @@
         console.log('UI closed');
     };
 
-    // Initialize UI
-    currentX = window.innerWidth - 340 - 20;
-    currentY = 20;
+    // Initialize UI and Auto-Start
     overlay.style.left = `${currentX}px`;
     overlay.style.top = `${currentY}px`;
     if (quests.length > 0) {
-        currentQuest = quests[0]; // Select recent quest
+        currentQuest = quests[0];
         let taskConfig = currentQuest.config.taskConfig || currentQuest.config.taskConfigV2;
         taskName = ["WATCH_VIDEO", "PLAY_ON_DESKTOP", "STREAM_ON_DESKTOP", "PLAY_ACTIVITY"].find(x => taskConfig.tasks[x] != null);
         secondsNeeded = taskConfig.tasks[taskName]?.target ?? 0;
         questSelect.value = 0;
         syncProgress();
-        startBtn.disabled = !taskName;
-        if (!taskName) showError("THIS QUEST IS NOT SUPPORTED");
+        if (taskName) {
+            startBtn.disabled = false;
+            startQuest(); // Auto-start the quest
+        } else {
+            showError("THIS QUEST IS NOT SUPPORTED");
+            startBtn.disabled = true;
+        }
     }
     updateUI();
 })();
