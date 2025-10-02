@@ -60,7 +60,7 @@
         fontSize: '24px',
         zIndex: 999998
     });
-    appearBtn.innerHTML = '↗';
+    appearBtn.innerHTML = '↖';
     document.body.appendChild(appearBtn);
 
     const overlay = document.createElement('div');
